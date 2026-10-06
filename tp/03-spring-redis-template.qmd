@@ -1,0 +1,176 @@
+---
+title: "TP 3 — Redis avec Spring Data Redis"
+---
+
+## Objectifs
+
+- retrouver dans Spring les opérations déjà comprises avec le CLI ;
+- utiliser `StringRedisTemplate` pour des données lisibles ;
+- utiliser un `RedisTemplate<String, StudentProfile>` sérialisé en JSON ;
+- vérifier les effets de l'application avec `redis-cli` ;
+- prolonger le projet avec une liste bornée puis un index secondaire ;
+- conserver Redis Streams comme extension.
+
+## Projet fourni
+
+Le dossier `tp/spring-redis` contient une application minimale fondée sur :
+
+- Java 21 ;
+- Maven ;
+- Spring Boot 4.1.1 ;
+- Spring Data Redis avec Lettuce ;
+- une API HTTP simple.
+
+Démarrer Redis depuis la racine du dépôt :
+
+```bash
+docker compose up -d
+```
+
+Puis démarrer l'application :
+
+```bash
+cd tp/spring-redis
+mvn spring-boot:run
+```
+
+Vérifier :
+
+```bash
+curl http://localhost:8080/api/redis/ping
+```
+
+## Exploration guidée
+
+Lire dans cet ordre :
+
+1. `pom.xml` ;
+2. `application.yml` ;
+3. `RedisConfiguration` ;
+4. `StudentProfile` ;
+5. `RedisLabService` ;
+6. `RedisLabController`.
+
+Pour chaque méthode de `RedisLabService`, retrouver :
+
+- la structure Redis ;
+- la commande CLI équivalente ;
+- la convention de clé ;
+- le sérialiseur utilisé ;
+- le comportement si la clé est absente.
+
+## Vérification croisée
+
+Utiliser les requêtes fournies dans `requests.http` ou un client HTTP. Après chaque appel, inspecter Redis :
+
+```bash
+docker compose exec redis redis-cli
+```
+
+Exemples de vérifications :
+
+```text
+GET session:demo-token
+TTL session:demo-token
+SMEMBERS course:redis:participants
+ZRANGE course:redis:ranking 0 -1 REV WITHSCORES
+GET student:42
+```
+
+Observer que le profil est lisible en JSON alors que son type Java n'existe pas dans Redis.
+
+## Exercice 1 — Activités récentes
+
+Ajouter au projet une fonctionnalité permettant de :
+
+- enregistrer une activité pour un étudiant ;
+- conserver uniquement les dix plus récentes ;
+- les restituer de la plus récente à la plus ancienne.
+
+Contraintes :
+
+- utiliser `StringRedisTemplate` ;
+- centraliser la construction de la clé ;
+- ne pas charger toute la liste pour la tronquer côté Java ;
+- exposer un endpoint d'écriture et un endpoint de lecture ;
+- vérifier le résultat avec le CLI.
+
+<details><summary>Indice 1</summary>
+
+Reprendre exactement le modèle du TP CLI : ajout à gauche, troncature et lecture d'une plage.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Examiner `opsForList().leftPush`, `trim` et `range`.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Une clé possible est `student:<id>:activities`. La troncature doit conserver les indices `0` à `9`.
+
+</details>
+
+## Exercice 2 — Index par ville
+
+Ajouter un index permettant de retrouver les identifiants des étudiants d'une ville.
+
+Première étape : lors de l'enregistrement d'un nouveau profil, ajouter son identifiant à l'index de sa ville.
+
+Deuxième étape : définir explicitement ce qui doit se produire lors d'un changement de ville. Ne pas masquer le problème par une seconde copie complète du profil.
+
+Exigences :
+
+- une clé d'index calculée dans une méthode unique ;
+- un set d'identifiants ;
+- un endpoint de recherche par ville ;
+- une vérification avec `SMEMBERS` ;
+- un commentaire expliquant la limite de cohérence de l'implémentation choisie.
+
+## Exercice 3 — Absence ou indisponibilité
+
+Comparer les deux situations :
+
+1. lecture d'une clé inexistante ;
+2. arrêt du conteneur Redis pendant que l'application fonctionne.
+
+Observer les réponses HTTP et les exceptions. Modifier l'application pour que l'absence produise une réponse `404`, sans transformer une panne Redis en `404`.
+
+## Exercice 4 — Vérifier la sérialisation
+
+Répondre :
+
+1. Comment les clés sont-elles sérialisées ?
+2. Comment les profils sont-ils sérialisés ?
+3. Pourquoi un `StringRedisTemplate` ne peut-il pas désérialiser automatiquement `StudentProfile` ?
+4. Que se passerait-il si deux applications utilisaient des sérialiseurs différents pour `student:42` ?
+5. Comment feriez-vous évoluer le JSON en ajoutant un champ optionnel ?
+
+## Extension — Publier dans un Stream
+
+Après enregistrement d'un profil, publier un événement dans `events:students` avec :
+
+- `eventType` ;
+- `studentId` ;
+- `version` ;
+- `city`.
+
+Utiliser `opsForStream()` et vérifier avec :
+
+```text
+XRANGE events:students - +
+```
+
+Cette extension se limite à la production. Une boucle de consommation, les groupes et l'idempotence constituent un exercice ultérieur d'application distribuée.
+
+## Critères de qualité
+
+- les clés sont construites en un seul endroit ;
+- les types génériques des templates sont précis ;
+- aucun sérialiseur Java natif implicite n'est utilisé ;
+- les valeurs absentes sont distinguées des erreurs de connexion ;
+- les opérations Redis restent identifiables dans le code ;
+- chaque nouvelle fonctionnalité est inspectable depuis le CLI.
+

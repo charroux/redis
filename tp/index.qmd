@@ -1,0 +1,50 @@
+---
+title: "Travaux pratiques Redis"
+---
+
+## Organisation
+
+Les TP sont conçus pour être utilisés dans l'ordre suivant :
+
+1. CLI basique et choix des structures ;
+2. index secondaires, projections et file avec une liste ;
+3. accès aux mêmes concepts avec Spring Data Redis.
+
+Le cours sur l'événementiel et Redis Streams est présenté entre les TP 2 et 3.
+
+## Méthode commune
+
+Avant d'écrire une commande ou une ligne de Java, répondre aux questions suivantes :
+
+1. Quelles opérations l'application doit-elle effectuer ?
+2. Faut-il garantir l'unicité ?
+3. Quel ordre faut-il conserver : insertion ou score ?
+4. Des champs doivent-ils être modifiés indépendamment ?
+5. Redis propose-t-il une commande atomique adaptée ?
+6. La donnée doit-elle expirer ?
+7. Comment sa taille sera-t-elle bornée ?
+8. Quelle convention rend les clés inspectables ?
+9. Que signifie une clé absente ?
+10. Quelle requête ce modèle ne sait-il pas satisfaire efficacement ?
+
+## Utilisation des indices
+
+Chaque exercice propose jusqu'à trois indices repliés. Commencer sans les ouvrir :
+
+- l'indice 1 rappelle une propriété du besoin ;
+- l'indice 2 oriente vers une famille de structures ;
+- l'indice 3 donne les principales commandes sans fournir toute la solution.
+
+Une solution différente de la correction peut être correcte si elle satisfait les opérations et invariants demandés et si ses compromis sont explicités.
+
+## Remise à zéro
+
+Les exercices utilisent des préfixes distincts. Pour repartir d'une instance entièrement vide :
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+La commande `FLUSHDB` n'est utilisée que sur l'instance locale dédiée à la formation.
+

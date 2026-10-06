@@ -1,0 +1,30 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Travaux pratiques Redis"
+  page-navigation: true
+  sidebar:
+    style: docked
+    search: true
+    contents:
+      - index.qmd
+      - 01-cli-basique.qmd
+      - 02-cli-avance.qmd
+      - 03-spring-redis-template.qmd
+  page-footer:
+    left: "Travaux pratiques Redis"
+    right: "Les corrections sont publiées progressivement"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-copy: true
+    code-overflow: wrap
+
+lang: fr
+

@@ -1,0 +1,39 @@
+### Redis répond
+GET http://localhost:8080/api/redis/ping
+
+### Enregistrer une session pour 30 minutes
+PUT http://localhost:8080/api/redis/sessions/demo-token?studentId=42&ttlSeconds=1800
+
+### Lire la session
+GET http://localhost:8080/api/redis/sessions/demo-token
+
+### Supprimer la session
+DELETE http://localhost:8080/api/redis/sessions/demo-token
+
+### Enregistrer un profil JSON
+PUT http://localhost:8080/api/redis/students/42
+Content-Type: application/json
+
+{
+  "id": 42,
+  "name": "Ada",
+  "email": "ada@example.test",
+  "city": "Paris",
+  "version": 1
+}
+
+### Lire le profil
+GET http://localhost:8080/api/redis/students/42
+
+### Ajouter un participant
+PUT http://localhost:8080/api/redis/courses/redis/participants/42
+
+### Lister les participants
+GET http://localhost:8080/api/redis/courses/redis/participants
+
+### Augmenter un score
+POST http://localhost:8080/api/redis/courses/redis/scores/42?delta=12
+
+### Lire le classement
+GET http://localhost:8080/api/redis/courses/redis/ranking
+

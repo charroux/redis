@@ -1,0 +1,74 @@
+---
+title: "Découvrir Redis"
+---
+
+## Un serveur de structures de données
+
+Redis associe une **clé unique** à une **valeur typée**. Cette valeur peut être une chaîne, un hash, une liste, un ensemble, un ensemble trié ou une autre structure proposée par Redis.
+
+```{mermaid}
+flowchart LR
+    C[Client] -->|commande RESP| R[(Redis)]
+    R --> K1[session:7f2a → string]
+    R --> K2[user:42 → hash]
+    R --> K3[ranking:java → sorted set]
+```
+
+Le client envoie des commandes telles que `GET`, `HSET` ou `ZADD`. Redis exécute la commande sur la structure concernée et renvoie une réponse. Le protocole réseau utilisé par les clients est RESP, mais une bibliothèque cliente évite généralement de le manipuler directement.
+
+La documentation officielle décrit Redis comme un *data structure server*. C'est ce modèle qui permet de couvrir des usages différents avec le même serveur : cache, compteur, file, classement, session ou diffusion d'événements. Voir la [présentation officielle des types Redis](https://redis.io/docs/latest/develop/data-types/).
+
+## Pourquoi Redis est rapide
+
+Redis sert principalement les données depuis la mémoire. Ses commandes exploitent des structures spécialisées et la plupart des opérations courantes ont une complexité constante ou logarithmique.
+
+La rapidité ne signifie cependant pas « coût nul » :
+
+- le réseau reste traversé à chaque aller-retour ;
+- une valeur volumineuse consomme mémoire et bande passante ;
+- certaines commandes parcourent une collection complète ;
+- une commande longue bloque les autres commandes sur l'instance pendant son exécution ;
+- la persistance et la réplication ajoutent leurs propres compromis.
+
+::: {.callout-warning title="Une mémoire partagée, pas une variable Java"}
+Une opération composée de plusieurs commandes produit plusieurs échanges et peut être entrelacée avec les commandes d'autres clients. Il faut rechercher une commande atomique existante ou concevoir explicitement l'enchaînement.
+:::
+
+## Usages adaptés
+
+Redis est particulièrement adapté lorsque les données sont consultées fréquemment, ont une durée de vie claire ou tirent parti de ses structures natives :
+
+| Besoin | Modèle Redis possible |
+|---|---|
+| Cache d'une réponse coûteuse | chaîne ou hash avec TTL |
+| Session | chaîne JSON ou hash avec TTL |
+| Compteur | chaîne numérique et `INCR` |
+| Absence de doublons | ensemble |
+| Classement | ensemble trié |
+| File simple | liste |
+| Journal d'événements distribué | stream |
+
+## Ce que Redis n'est pas
+
+Redis n'est pas automatiquement :
+
+- la source de vérité de toutes les données métier ;
+- un remplacement transparent d'une base relationnelle ;
+- durable sans configuration et sans stratégie de sauvegarde ;
+- cohérent avec une autre base au sein d'une transaction commune ;
+- sécurisé simplement parce qu'il est lancé sur une machine locale.
+
+La première question de conception n'est donc pas « quelle commande utiliser ? », mais « que se passe-t-il si cette donnée disparaît, expire ou devient temporairement inaccessible ? »
+
+## Instance et bases logiques
+
+Une instance Redis propose plusieurs bases logiques numérotées dans certaines configurations. Elles partagent néanmoins les mêmes ressources et ne constituent pas une isolation forte. Pour une application moderne, on privilégie généralement :
+
+- une convention de nommage explicite ;
+- une instance ou un service distinct lorsque l'isolation est importante ;
+- la base logique par défaut pendant la formation.
+
+## À retenir
+
+Redis exécute des commandes sur des valeurs structurées, accessibles par une clé. Le modèle de données et le cycle de vie des clés sont des décisions applicatives, pas de simples détails techniques.
+

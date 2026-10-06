@@ -1,0 +1,146 @@
+---
+title: "Passer de Redis CLI à Spring"
+---
+
+## Une traduction, pas un nouveau modèle
+
+Spring Data Redis fournit une fabrique de connexions et des abstractions d'opérations. `RedisTemplate` gère notamment l'obtention des connexions et la sérialisation. Les vues de l'API correspondent directement aux types Redis :
+
+| Redis | Spring Data Redis |
+|---|---|
+| String | `opsForValue()` |
+| Hash | `opsForHash()` |
+| List | `opsForList()` |
+| Set | `opsForSet()` |
+| Sorted set | `opsForZSet()` |
+| clé et TTL | méthodes du template |
+
+Cette correspondance est documentée dans [Working with Objects through RedisTemplate](https://docs.spring.io/spring-data/redis/reference/redis/template.html).
+
+```{mermaid}
+flowchart LR
+    S[Service Spring] --> T[StringRedisTemplate ou RedisTemplate]
+    T --> L[Client Lettuce]
+    L -->|RESP / TCP| R[(Redis)]
+```
+
+Lettuce est le client généralement configuré par Spring Boot. Le template est réutilisable entre appels ; il ne faut pas créer une connexion Redis manuellement pour chaque méthode métier.
+
+## Commencer par StringRedisTemplate
+
+`StringRedisTemplate` sérialise clés et valeurs comme des chaînes lisibles. Il permet de comparer facilement le code Java avec le CLI :
+
+```java
+@Service
+public class ViewCounter {
+    private static final String KEY_PREFIX = "article:";
+
+    private final StringRedisTemplate redis;
+
+    public ViewCounter(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
+
+    public long increment(long articleId) {
+        String key = KEY_PREFIX + articleId + ":views";
+        Long value = redis.opsForValue().increment(key);
+        return value;
+    }
+}
+```
+
+L'opération centrale reste `INCR`. Spring convertit l'appel et sa réponse, mais la garantie d'atomicité vient de Redis.
+
+Un TTL se formule explicitement :
+
+```java
+redis.opsForValue().set(
+    "session:" + token,
+    userId,
+    Duration.ofMinutes(30)
+);
+```
+
+La même donnée doit rester compréhensible depuis le CLI :
+
+```text
+GET session:7f2a
+TTL session:7f2a
+```
+
+## RedisTemplate et les objets
+
+`RedisTemplate<K, V>` peut convertir des types Java en octets. Ce choix de sérialisation constitue un contrat de données entre toutes les applications qui accèdent aux mêmes clés.
+
+```java
+@Bean
+RedisTemplate<String, StudentSession> sessionRedisTemplate(
+        RedisConnectionFactory connectionFactory,
+        ObjectMapper objectMapper) {
+
+    RedisTemplate<String, StudentSession> template = new RedisTemplate<>();
+    template.setConnectionFactory(connectionFactory);
+    template.setKeySerializer(RedisSerializer.string());
+    template.setValueSerializer(
+        new JacksonJsonRedisSerializer<>(objectMapper, StudentSession.class)
+    );
+    template.afterPropertiesSet();
+    return template;
+}
+```
+
+La signature exacte des sérialiseurs dépend de la version de Spring Data Redis retenue pour le projet pédagogique ; elle sera figée et compilée dans le projet minimal fourni avec les TP.
+
+## Pourquoi expliciter la sérialisation
+
+Le serveur Redis ne connaît que des octets et des structures Redis. Le type Java n'est pas conservé magiquement.
+
+La sérialisation Java native par défaut de certaines configurations présente plusieurs défauts :
+
+- données illisibles depuis le CLI ;
+- couplage aux classes Java ;
+- évolution et interopérabilité difficiles ;
+- risques lors de la désérialisation de données non fiables.
+
+La documentation Spring recommande un autre format, tel que JSON, lorsque des données non fiables peuvent être rencontrées. JSON est lisible et interopérable, mais son schéma doit lui aussi évoluer de manière maîtrisée.
+
+::: {.callout-warning title="Ne pas mélanger les sérialiseurs"}
+Une clé écrite avec un template peut devenir illisible avec un autre template configuré différemment. Les sérialiseurs de clés, valeurs, champs de hash et valeurs de hash doivent faire partie de la configuration documentée.
+:::
+
+## Gérer l'absence et l'indisponibilité
+
+Une lecture peut ne rien renvoyer parce que :
+
+- la clé n'a jamais existé ;
+- elle a expiré ;
+- elle a été supprimée ou évincée ;
+- le nom ou le sérialiseur utilisé n'est pas celui attendu.
+
+Une panne de connexion est différente d'une valeur absente. Le code métier ne doit pas transformer silencieusement toute exception Redis en « donnée inexistante ».
+
+## Cache-aside
+
+Dans une stratégie cache-aside, l'application orchestre le cache :
+
+```{mermaid}
+sequenceDiagram
+    participant A as Application
+    participant R as Redis
+    participant B as Base de données
+    A->>R: GET product:42
+    alt valeur présente
+        R-->>A: valeur
+    else valeur absente
+        R-->>A: nil
+        A->>B: SELECT product 42
+        B-->>A: produit
+        A->>R: SET product:42 ... EX ...
+    end
+```
+
+Cette stratégie impose de traiter l'invalidation, le TTL, les lectures concurrentes lors d'un défaut de cache et le comportement quand Redis est indisponible. `RedisTemplate` facilite les commandes ; il ne choisit pas la politique métier.
+
+## La base de TP Spring
+
+Le projet étudiant est volontairement réduit : une application Spring Boot, une configuration de connexion, un contrôleur REST et un service regroupant les opérations déjà rencontrées. Il expose d'abord `StringRedisTemplate`, puis un seul `RedisTemplate` JSON explicitement configuré. Redis Streams reste une extension afin que l'apprentissage de Spring ne masque pas les concepts Redis.

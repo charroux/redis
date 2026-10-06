@@ -1,0 +1,193 @@
+---
+title: "TP 2 — Index, projections et file de travail"
+---
+
+## Objectifs
+
+- séparer donnée canonique et index secondaires ;
+- mesurer la duplication et l'amplification d'écriture ;
+- maintenir plusieurs structures de manière cohérente ;
+- versionner et réconcilier une projection ;
+- construire une file de travail avec une liste ;
+- constater les mécanismes qu'il faudrait ajouter avant Redis Streams.
+
+## Préparation des données canoniques
+
+Créer quatre profils :
+
+```text
+HSET student:42 name "Ada" email "ada@example.test" city "Paris" version 1 source "students-service"
+HSET student:51 name "Linus" email "linus@example.test" city "Lyon" version 1 source "students-service"
+HSET student:63 name "Grace" email "grace@example.test" city "Lyon" version 1 source "students-service"
+HSET student:77 name "Alan" email "alan@example.test" city "Lille" version 1 source "students-service"
+```
+
+Vérifier chaque profil avec `HGETALL`.
+
+## Exercice 1 — Construire trois index
+
+Créer les chemins de lecture suivants sans recopier les profils complets :
+
+1. retrouver l'identifiant à partir d'un email unique ;
+2. obtenir les identifiants des étudiants d'une ville ;
+3. obtenir les étudiants par score décroissant.
+
+Ajouter des scores de votre choix, puis démontrer :
+
+- la recherche d'Ada par email ;
+- la liste des étudiants lyonnais ;
+- les deux meilleurs scores ;
+- le chargement des profils canoniques après lecture d'un index.
+
+<details><summary>Indice 1</summary>
+
+Les index doivent conserver principalement des identifiants. Le profil reste sous `student:<id>`.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Un email unique peut être un champ d'un hash global ; une ville correspond à un set ; un score correspond à un sorted set.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Étudier `HSET students:by-email`, `SADD students:by-city:<ville>` et `ZADD students:by-score`.
+
+</details>
+
+## Exercice 2 — Changement de ville cohérent
+
+Ada déménage de Paris à Lyon. La modification doit :
+
+- retirer son identifiant de l'ancien index ;
+- l'ajouter au nouvel index ;
+- modifier son profil ;
+- incrémenter sa version.
+
+Réaliser d'abord volontairement seulement la modification du profil, puis observer l'incohérence. Réparer ensuite le modèle avec un groupe de commandes `MULTI`/`EXEC`.
+
+Questions :
+
+1. Que garantit la transaction Redis dans ce cas ?
+2. Que ne garantit-elle pas si l'application se trompe d'ancienne ville ?
+3. Que se passe-t-il si deux applications modifient simultanément le même profil ?
+4. Dans quel cas `WATCH` serait-il utile ?
+
+<details><summary>Indice 1</summary>
+
+La transaction doit contenir un `SREM`, un `SADD` et un `HSET`.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+La version peut être augmentée avec `HINCRBY` plutôt que calculée par le client.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Encadrer les commandes par `MULTI` et `EXEC`, puis vérifier à la fois le profil et les deux sets.
+
+</details>
+
+## Exercice 3 — Rendre une projection vérifiable
+
+Ajouter à chaque index de ville une clé de métadonnées contenant :
+
+- la source de la projection ;
+- sa version de schéma ;
+- une date de dernière reconstruction ;
+- le dernier identifiant d'événement appliqué, initialement `none`.
+
+Proposer une convention de clé qui sépare clairement données et métadonnées.
+
+Expliquer lesquelles de ces métadonnées servent à l'audit et lesquelles permettent réellement de détecter une incohérence.
+
+## Exercice 4 — Réconciliation
+
+Introduire volontairement deux défauts :
+
+- ajouter l'identifiant `999` dans `students:by-city:Lyon` alors que le profil n'existe pas ;
+- retirer l'étudiant `63` de cet index alors que son profil indique toujours Lyon.
+
+Sans utiliser `KEYS` :
+
+1. parcourir l'index de Lyon ;
+2. détecter et retirer la référence orpheline ;
+3. parcourir progressivement les profils canoniques ;
+4. détecter et rétablir l'appartenance manquante ;
+5. expliquer comment automatiser ce contrôle dans une application.
+
+<details><summary>Indice 1</summary>
+
+Une réconciliation compare deux points de vue ; aucun des deux parcours ne suffit seul.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Utiliser `SSCAN` pour l'index et `SCAN ... MATCH student:*` pour les profils.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Pour chaque membre de l'index, tester `EXISTS student:<id>`. Pour chaque profil, lire `city` puis tester `SISMEMBER` dans l'index correspondant.
+
+</details>
+
+## Exercice 5 — File simple avec une liste
+
+Ouvrir deux terminaux connectés à `redis-cli`.
+
+Dans le terminal consommateur :
+
+```text
+BRPOP jobs:email 0
+```
+
+Dans le terminal producteur :
+
+```text
+LPUSH jobs:email "welcome:42"
+LPUSH jobs:email "result:51"
+```
+
+Observer l'ordre et le comportement bloquant. Ajouter un second consommateur et déterminer comment les messages sont répartis.
+
+## Exercice 6 — Fenêtre de perte et liste de travail
+
+La commande `BRPOP` retire le message avant la fin du traitement. Simuler un consommateur qui lit puis s'arrête sans avoir terminé.
+
+Remplacer ensuite la lecture par :
+
+```text
+BLMOVE jobs:email jobs:email:processing RIGHT LEFT 0
+```
+
+Après un traitement simulé, acquitter manuellement avec `LREM`.
+
+Répondre aux questions suivantes :
+
+1. Comment détecter un message abandonné dans `jobs:email:processing` ?
+2. Comment connaître son propriétaire et la date de début du traitement ?
+3. Comment le réattribuer sans double traitement ?
+4. Comment permettre à plusieurs applications indépendantes de lire le même événement ?
+5. Comment rejouer l'historique ?
+
+Ces limites motivent l'introduction de Redis Streams dans la partie suivante du cours.
+
+## Bilan autonome
+
+Rédiger une courte décision d'architecture répondant aux questions suivantes :
+
+- quelles structures sont canoniques ?
+- quelles structures sont reconstructibles ?
+- quelles écritures sont amplifiées ?
+- où une transaction suffit-elle ?
+- où accepteriez-vous une cohérence éventuelle ?
+- quelles métriques signaleraient une projection en retard ou incohérente ?
+

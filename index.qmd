@@ -1,0 +1,56 @@
+---
+title: "Redis : des commandes à Spring"
+subtitle: "Comprendre Redis avant de l'utiliser dans une application"
+---
+
+## Finalité du cours
+
+Redis ne se réduit ni à un cache ni à une table associative distante. C'est un serveur de structures de données : le choix de la structure, des commandes et de la durée de vie des clés fait partie de la conception de l'application.
+
+Le cours suit donc une progression volontaire :
+
+```{mermaid}
+flowchart LR
+    A[Modèle mental Redis] --> B[Commandes avec redis-cli]
+    B --> C[Choix des structures]
+    C --> D[Index et projections]
+    D --> E[Listes et Streams]
+    E --> F[StringRedisTemplate]
+    F --> G[RedisTemplate et JSON]
+    G --> H[Exploitation et limites]
+```
+
+L'objectif n'est pas de mémoriser le catalogue des commandes. Il est de savoir transformer un besoin applicatif en un petit modèle Redis, puis de retrouver ce modèle sans ambiguïté dans le code Spring.
+
+## Objectifs d'apprentissage
+
+À l'issue de la formation, un étudiant doit pouvoir :
+
+- expliquer ce que Redis conserve en mémoire et comment un client communique avec lui ;
+- choisir entre chaîne, hash, liste, ensemble et ensemble trié ;
+- utiliser des clés lisibles, une expiration explicite et des commandes atomiques ;
+- manipuler et inspecter les données avec `redis-cli` ;
+- retrouver les opérations Redis dans les API de `StringRedisTemplate` et `RedisTemplate` ;
+- choisir un format de sérialisation interopérable ;
+- identifier les conséquences d'une panne, d'une éviction ou d'une mauvaise commande ;
+- distinguer les garanties de Redis de celles d'une base relationnelle.
+
+## Périmètre
+
+Le parcours porte sur Redis Open Source en instance unique et sur l'accès impératif avec Spring Data Redis. Redis Streams est étudié depuis le CLI pour comprendre le passage d'une file de travail à un journal d'événements. Cluster, Sentinel, API réactive, recherche et types probabilistes restent des prolongements.
+
+::: {.callout-note title="Pourquoi commencer par le CLI ?"}
+Le CLI rend visibles la clé, sa structure, son expiration et la valeur réellement stockée. Une fois ce modèle compris, Spring devient une traduction typée des mêmes opérations plutôt qu'une couche magique.
+:::
+
+## Fil conducteur
+
+Plusieurs besoins simples serviront d'exemples au fil du cours :
+
+- conserver un jeton de session pour une durée limitée ;
+- compter des consultations sans perdre d'incréments concurrents ;
+- représenter un profil par des champs ;
+- supprimer les doublons dans un ensemble de participants ;
+- maintenir un classement ordonné par score.
+
+Les travaux pratiques forment un projet Quarto séparé. Le cours reste néanmoins lisible comme un tout : il n'est pas nécessaire de suivre des liens vers les TP pour comprendre la progression.

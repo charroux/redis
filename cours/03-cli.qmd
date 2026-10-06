@@ -1,0 +1,112 @@
+---
+title: "Manipuler Redis avec redis-cli"
+---
+
+## Lire les réponses
+
+Le CLI affiche la nature de la réponse reçue : texte, entier, collection, valeur absente ou erreur.
+
+```text
+127.0.0.1:6379> PING
+PONG
+127.0.0.1:6379> GET absent
+(nil)
+127.0.0.1:6379> INCR compteur
+(integer) 1
+```
+
+Une valeur absente n'est pas une chaîne vide. Cette distinction devra être conservée dans le code applicatif.
+
+## Une première clé
+
+```text
+SET message "Bonjour Redis"
+GET message
+TYPE message
+EXISTS message
+DEL message
+```
+
+`SET` remplace la valeur précédente de la clé. `TYPE` permet d'identifier la structure stockée. `DEL` supprime la clé indépendamment de son type.
+
+## Nommer les clés
+
+Redis ne crée pas de tables ni d'espaces de noms. Le nom de la clé porte donc une partie du modèle :
+
+```text
+user:42
+user:42:session
+course:redis:participants
+ranking:redis
+```
+
+Le deux-points n'a pas de signification spéciale dans une instance simple ; c'est une convention de lisibilité. La documentation conseille un schéma stable, par exemple `type-objet:id`. Voir [Keys and values](https://redis.io/docs/latest/develop/using-commands/keyspace/).
+
+Une bonne clé est :
+
+- compréhensible lors d'une inspection ;
+- stable dans le temps ;
+- suffisamment qualifiée pour éviter les collisions ;
+- produite en un seul endroit dans le code applicatif.
+
+## Expiration
+
+Une clé peut être persistante ou porter une date d'expiration :
+
+```text
+SET session:7f2a "user:42" EX 1800
+TTL session:7f2a
+PERSIST session:7f2a
+EXPIRE session:7f2a 60
+```
+
+`TTL` renvoie notamment :
+
+- un nombre positif : secondes restantes ;
+- `-1` : la clé existe sans expiration ;
+- `-2` : la clé n'existe pas.
+
+L'expiration est attachée à la clé entière. Modifier le contenu d'un hash ne crée pas automatiquement une expiration différente pour chacun de ses champs.
+
+## Atomicité d'une commande
+
+```text
+INCR page:42:views
+INCRBY account:42:credits 10
+DECR stock:book:redis
+```
+
+`INCR` est atomique : deux clients concurrents ne lisent pas la même ancienne valeur pour écrire ensuite le même résultat. La séquence naïve `GET`, calcul côté client, puis `SET` ne possède pas cette garantie.
+
+Atomicité ne signifie pas transaction métier globale. Une commande atomique n'assure pas à elle seule la cohérence avec une base SQL ou un autre service.
+
+## Observer sans bloquer
+
+Pour un petit jeu de données pédagogique, `KEYS *` paraît pratique. Sur un serveur chargé, `KEYS` doit parcourir l'espace de clés et peut bloquer l'instance. On utilise `SCAN` pour une itération progressive :
+
+```text
+SCAN 0 MATCH user:* COUNT 100
+```
+
+Le premier élément retourné est le prochain curseur. L'itération se termine lorsque Redis retourne de nouveau le curseur `0`. `SCAN` évite le long blocage de `KEYS`, mais ne constitue pas une photographie transactionnelle si les données changent pendant le parcours.
+
+## Examiner l'instance
+
+Quelques commandes utiles pendant le développement :
+
+```text
+DBSIZE
+INFO server
+INFO memory
+INFO stats
+```
+
+`MONITOR` affiche toutes les commandes reçues, mais son coût et la fuite potentielle de données en font un outil de diagnostic ponctuel, pas un mécanisme d'observabilité permanent.
+
+::: {.callout-warning title="FLUSHDB et FLUSHALL"}
+`FLUSHDB` supprime toutes les clés de la base courante ; `FLUSHALL` vide toutes les bases de l'instance. Ces commandes ne doivent jamais être intégrées sans garde-fou dans une application ou un script partagé.
+:::
+
+## Première frontière
+
+Les commandes précédentes suffisent tant qu'une opération métier correspond à une seule clé ou à une seule commande atomique. Dès qu'une modification doit maintenir plusieurs représentations cohérentes, il faut raisonner sur les transactions, les fonctions Redis ou la cohérence éventuelle. Ces mécanismes seront introduits après l'étude des index et des projections, au moment où leur nécessité devient concrète.

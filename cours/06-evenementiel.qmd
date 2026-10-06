@@ -1,0 +1,157 @@
+---
+title: "De la file de travail à Redis Streams"
+---
+
+## Tâche, message et événement
+
+Une **tâche** demande à un consommateur d'effectuer une action. Un **événement** décrit un fait déjà survenu. La distinction influence la conservation et la consommation :
+
+- une tâche est généralement traitée par un seul worker ;
+- un événement peut intéresser plusieurs projections indépendantes ;
+- un événement doit souvent être relu pour reconstruire un état.
+
+## Une file avec une liste
+
+Une liste Redis fournit une première file FIFO simple. Le producteur ajoute à gauche :
+
+```text
+LPUSH jobs:email "message-1"
+LPUSH jobs:email "message-2"
+```
+
+Le consommateur attend et retire à droite :
+
+```text
+BRPOP jobs:email 0
+```
+
+Le blocage évite un polling continu. Plusieurs consommateurs peuvent attendre sur la même liste et se partager les éléments.
+
+## La fenêtre de perte
+
+`BRPOP` retire le message avant que le traitement applicatif soit terminé. Si le consommateur tombe en panne après la lecture, le message n'est plus dans la liste.
+
+Une variante déplace d'abord le message dans une liste de travail :
+
+```text
+BLMOVE jobs:email jobs:email:processing RIGHT LEFT 0
+```
+
+Après succès, le consommateur retire explicitement le message :
+
+```text
+LREM jobs:email:processing 1 "message-1"
+```
+
+Cette solution demande encore de construire soi-même les délais, la réattribution des messages abandonnés, l'identité des consommateurs et l'observabilité.
+
+## Du retrait à la conservation
+
+Un Stream conserve ses entrées après leur lecture et leur attribue un identifiant ordonné :
+
+```text
+XADD events:orders * type OrderCreated orderId 42 version 1
+XADD events:orders * type OrderPaid orderId 42 version 2
+```
+
+Redis retourne un identifiant tel que `1760000000000-0`. Il permet de lire une plage :
+
+```text
+XRANGE events:orders - +
+```
+
+Ou d'attendre les nouveaux événements :
+
+```text
+XREAD BLOCK 0 STREAMS events:orders $
+```
+
+Le symbole `$` signifie « seulement les événements ajoutés après le début de cette lecture ». Pour relire depuis le commencement, on utilise `0-0`.
+
+La documentation décrit les [Redis Streams](https://redis.io/docs/latest/develop/data-types/streams/) comme des journaux append-only avec différentes stratégies de consommation.
+
+## Liste ou Stream ?
+
+| Besoin | Liste | Stream |
+|---|---:|---:|
+| File FIFO simple | oui | oui |
+| Lecture bloquante | oui | oui |
+| Conservation après lecture | non | oui |
+| Relecture de l'historique | non | oui |
+| Identifiant ordonné | non | oui |
+| Acquittement explicite | à construire | oui |
+| Plusieurs groupes indépendants | non | oui |
+| Reprise des messages abandonnés | à construire | oui |
+
+## Groupes de consommateurs
+
+Un groupe distribue les événements entre ses consommateurs tout en conservant la trace des livraisons non acquittées :
+
+```text
+XGROUP CREATE events:orders billing 0 MKSTREAM
+```
+
+Un premier consommateur lit un événement jamais livré au groupe :
+
+```text
+XREADGROUP GROUP billing consumer-1 \
+  COUNT 1 BLOCK 5000 \
+  STREAMS events:orders >
+```
+
+L'événement est désormais dans la liste des entrées en attente du groupe :
+
+```text
+XPENDING events:orders billing
+```
+
+Après traitement réussi :
+
+```text
+XACK events:orders billing 1760000000000-0
+```
+
+Si le consommateur disparaît avant `XACK`, un autre peut reprendre les anciens messages avec `XAUTOCLAIM`.
+
+## Livraison au moins une fois
+
+Un événement non acquitté peut être livré de nouveau. Le traitement doit donc être idempotent. Un consommateur de projection peut comparer la version de l'événement avec la version déjà appliquée, puis effectuer la vérification et la mise à jour atomiquement.
+
+Acquitter avant la modification risque de perdre le traitement. Modifier puis tomber en panne avant l'acquittement entraîne une nouvelle livraison. Cette seconde situation est acceptable lorsque la modification est idempotente.
+
+## Plusieurs projections
+
+Plusieurs groupes peuvent lire le même Stream indépendamment :
+
+```text
+events:students
+├── group city-index
+├── group email-index
+└── group analytics
+```
+
+Chaque groupe possède sa progression et ses entrées en attente. À l'intérieur d'un groupe, plusieurs consommateurs se partagent le travail.
+
+## Rétention et immutabilité
+
+Un Stream est append-only dans son usage normal, mais ses entrées peuvent être supprimées ou tronquées. Une limite évite une croissance sans fin :
+
+```text
+XADD events:orders MAXLEN ~ 10000 * type OrderCreated orderId 43
+```
+
+Une politique de rétention doit être compatible avec la durée maximale d'indisponibilité des consommateurs et avec la capacité de reconstruction. Un Stream Redis ne devient pas un journal permanent sans persistance, sauvegardes et règles d'exploitation adaptées.
+
+## Ce que la programmation ajoutera
+
+Le CLI suffit pour observer production, lecture, groupes, messages en attente et acquittements. Une application devient nécessaire pour :
+
+- exécuter une boucle de consommation ;
+- gérer exceptions, délais et arrêt propre ;
+- appliquer une projection métier ;
+- rendre cette projection idempotente ;
+- mesurer le retard et les échecs ;
+- choisir une stratégie de reprise ou de mise à l'écart.
+
+Ces difficultés relèvent de l'application distribuée, pas seulement de la syntaxe Redis.
+

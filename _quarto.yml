@@ -1,0 +1,58 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - index.qmd
+    - cours/*.qmd
+
+website:
+  title: "Redis : des commandes à Spring"
+  page-navigation: true
+  navbar:
+    left:
+      - href: index.qmd
+        text: Accueil
+      - text: Cours
+        menu:
+          - cours/01-decouvrir-redis.qmd
+          - cours/02-environnement.qmd
+          - cours/03-cli.qmd
+          - cours/04-modeliser.qmd
+          - cours/05-index-projection.qmd
+          - cours/06-evenementiel.qmd
+          - cours/07-spring.qmd
+          - cours/08-exploitation.qmd
+    right:
+      - icon: github
+        href: https://github.com/charroux/redis
+        aria-label: Dépôt GitHub
+  sidebar:
+    style: docked
+    search: true
+    contents:
+      - index.qmd
+      - section: "Cours"
+        contents:
+          - cours/01-decouvrir-redis.qmd
+          - cours/02-environnement.qmd
+          - cours/03-cli.qmd
+          - cours/04-modeliser.qmd
+          - cours/05-index-projection.qmd
+          - cours/06-evenementiel.qmd
+          - cours/07-spring.qmd
+          - cours/08-exploitation.qmd
+  page-footer:
+    left: "Support pédagogique Redis"
+    right: "Construit avec Quarto"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-copy: true
+    code-overflow: wrap
+    link-external-newwindow: true
+
+lang: fr

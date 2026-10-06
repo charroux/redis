@@ -1,0 +1,279 @@
+---
+title: "TP 1 — Redis CLI et structures fondamentales"
+---
+
+## Objectifs
+
+- utiliser `redis-cli` sans dépendre d'une interface graphique ;
+- créer, lire, inspecter et supprimer des clés ;
+- manipuler strings, hashes, sets, sorted sets et listes ;
+- choisir une structure à partir des opérations attendues ;
+- définir une convention de clés et une politique d'expiration ;
+- identifier une recherche que le modèle ne sait pas satisfaire.
+
+## Préparation
+
+Depuis la racine du dépôt :
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose exec redis redis-cli
+```
+
+Vérifier la connexion :
+
+```text
+PING
+```
+
+Le résultat attendu est `PONG`.
+
+## Tutoriel guidé
+
+### Une première valeur
+
+Saisir les commandes une par une et observer chaque réponse :
+
+```text
+SET tutorial:message "Bonjour Redis"
+GET tutorial:message
+TYPE tutorial:message
+EXISTS tutorial:message
+DEL tutorial:message
+GET tutorial:message
+```
+
+Questions d'observation :
+
+1. Quelle différence voyez-vous entre une chaîne vide et une clé absente ?
+2. Que renvoie `DEL` lorsque la clé n'existe déjà plus ?
+
+### Une valeur temporaire
+
+```text
+SET tutorial:session "student:42" EX 60
+TTL tutorial:session
+GET tutorial:session
+```
+
+Attendre ou réduire la durée, puis constater la disparition de la clé. Tester ensuite :
+
+```text
+SET tutorial:persistent "value"
+TTL tutorial:persistent
+TTL tutorial:absent
+```
+
+Interpréter les valeurs négatives retournées par `TTL`.
+
+### Un objet sous forme de hash
+
+```text
+HSET tutorial:student:42 name "Ada" email "ada@example.test" city "Paris"
+HGET tutorial:student:42 name
+HMGET tutorial:student:42 name city
+HGETALL tutorial:student:42
+HINCRBY tutorial:student:42 logins 1
+```
+
+Observer que les champs peuvent être modifiés indépendamment.
+
+### Un groupe sans doublons
+
+```text
+SADD tutorial:course:redis:participants 42 51 42
+SCARD tutorial:course:redis:participants
+SISMEMBER tutorial:course:redis:participants 42
+SMEMBERS tutorial:course:redis:participants
+SREM tutorial:course:redis:participants 51
+```
+
+Comparer le nombre d'arguments fournis au premier `SADD` avec le nombre d'éléments réellement présents.
+
+### Un classement
+
+```text
+ZADD tutorial:course:redis:ranking 12 42 18 51 15 63
+ZRANGE tutorial:course:redis:ranking 0 -1 WITHSCORES
+ZRANGE tutorial:course:redis:ranking 0 -1 REV WITHSCORES
+ZINCRBY tutorial:course:redis:ranking 4 42
+ZREVRANK tutorial:course:redis:ranking 42
+```
+
+Déterminer si le rang retourné commence à zéro ou à un.
+
+### Une liste d'activités
+
+```text
+LPUSH tutorial:student:42:activities "login"
+LPUSH tutorial:student:42:activities "open-course"
+LPUSH tutorial:student:42:activities "run-command"
+LRANGE tutorial:student:42:activities 0 -1
+LTRIM tutorial:student:42:activities 0 1
+LRANGE tutorial:student:42:activities 0 -1
+```
+
+Identifier quel côté de la liste contient l'activité la plus récente.
+
+## Exercice 1 — Présence temporaire
+
+Concevoir un modèle permettant de :
+
+- signaler qu'un étudiant est connecté ;
+- associer la connexion à son identifiant ;
+- vérifier sa présence ;
+- prolonger sa présence ;
+- le déconnecter ;
+- supprimer automatiquement l'information après une période d'inactivité.
+
+Produire :
+
+1. la convention de clé ;
+2. la structure choisie et sa justification ;
+3. les commandes pour chaque opération ;
+4. les résultats attendus lorsque la session existe puis lorsqu'elle a expiré.
+
+<details><summary>Indice 1</summary>
+
+La durée de vie concerne une connexion individuelle et doit pouvoir être renouvelée indépendamment des autres.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Une clé par jeton ou par étudiant évite d'avoir besoin d'une expiration différente pour chaque membre d'une collection.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Examiner `SET` avec l'option `EX`, puis `GET`, `TTL`, `EXPIRE` et `DEL`.
+
+</details>
+
+## Exercice 2 — Inscriptions sans doublons
+
+Concevoir la représentation des inscriptions à un cours. Il faut pouvoir :
+
+- inscrire un étudiant ;
+- éviter les inscriptions multiples ;
+- tester une inscription ;
+- désinscrire un étudiant ;
+- compter et lister les inscrits.
+
+Tester le modèle avec les identifiants `42`, `51` et `63`, en inscrivant deux fois l'étudiant `42`.
+
+<details><summary>Indice 1</summary>
+
+L'ordre d'inscription n'est pas demandé, mais l'unicité est une propriété essentielle.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Rechercher la structure mathématique qui représente une collection non ordonnée d'éléments uniques.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Les commandes utiles commencent par `S` : `SADD`, `SISMEMBER`, `SREM`, `SCARD`, `SMEMBERS`.
+
+</details>
+
+## Exercice 3 — Classement évolutif
+
+Concevoir un classement qui permette de :
+
+- enregistrer un score courant par étudiant ;
+- augmenter ce score sans lecture préalable ;
+- obtenir les trois meilleurs étudiants ;
+- connaître le rang et le score d'un étudiant ;
+- garantir qu'un étudiant n'apparaisse qu'une fois.
+
+Préciser si le score fait partie de l'identité de l'étudiant ou s'il est une propriété associée.
+
+<details><summary>Indice 1</summary>
+
+La collection doit être ordonnée par une valeur numérique modifiable.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Un sorted set associe un score à chaque membre unique.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Étudier `ZADD`, `ZINCRBY`, `ZRANGE ... REV`, `ZREVRANK` et `ZSCORE`.
+
+</details>
+
+## Exercice 4 — Activités récentes
+
+Conserver pour chaque étudiant les dix activités les plus récentes. Les doublons sont autorisés et l'ordre d'arrivée doit être conservé.
+
+Définir :
+
+- la convention de clé ;
+- le côté utilisé pour ajouter une activité ;
+- la commande de lecture ;
+- la manière de borner la collection après chaque ajout.
+
+<details><summary>Indice 1</summary>
+
+L'ordre d'insertion compte et une même activité peut survenir plusieurs fois.
+
+</details>
+
+<details><summary>Indice 2</summary>
+
+Une liste convient, mais elle ne se borne pas automatiquement.
+
+</details>
+
+<details><summary>Indice 3</summary>
+
+Combiner `LPUSH`, `LTRIM` et `LRANGE`.
+
+</details>
+
+## Exercice 5 — Mini-modèle autonome
+
+Concevoir le modèle Redis d'un enseignement universitaire contenant :
+
+- le profil de chaque étudiant ;
+- sa session temporaire ;
+- les participants à un cours, sans doublon ;
+- le classement du cours ;
+- les dix dernières activités de chaque étudiant.
+
+Pour chaque besoin, fournir un tableau :
+
+| Besoin | Opérations | Structure | Clé | TTL ou limite | Commandes |
+|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... |
+
+Ensuite, créer un petit jeu de données et démontrer chaque opération dans le CLI.
+
+La qualité du travail est évaluée sur la justification du modèle, pas uniquement sur l'exécution des commandes.
+
+## Question d'ouverture — Retrouver par ville
+
+Les profils sont stockés sous les clés `student:<id>`. On connaît la ville « Lyon », mais aucun identifiant étudiant.
+
+1. Comment retrouver tous les étudiants lyonnais avec le modèle actuel ?
+2. Pourquoi `KEYS student:*` n'est-il pas une solution de production ?
+3. `SCAN` rend-il cette recherche réellement efficace ?
+4. Quelle structure supplémentaire pourrait rendre la lecture directe ?
+5. Quel nouveau risque apparaît si la ville change dans le profil ?
+
+Ne pas implémenter encore cette nouvelle structure. Formaliser le problème à résoudre dans la partie suivante du cours.
+
+## Nettoyage ciblé
+
+Supprimer les clés créées par le tutoriel sans vider toute l'instance. Utiliser `SCAN` pour les repérer, puis `DEL` ou `UNLINK` avec des clés explicites.
+

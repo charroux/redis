@@ -1,0 +1,109 @@
+---
+title: "Choisir une structure de données"
+---
+
+## La structure fait partie du modèle
+
+Deux modèles peuvent contenir les mêmes informations sans offrir les mêmes opérations. Le bon choix dépend surtout des lectures et écritures attendues, pas seulement de la forme initiale des données.
+
+| Structure | Propriété essentielle | Commandes typiques | Exemple |
+|---|---|---|---|
+| String | suite d'octets, valeur unique | `SET`, `GET`, `INCR` | jeton, compteur, JSON opaque |
+| Hash | champs et valeurs | `HSET`, `HGET`, `HGETALL` | profil utilisateur |
+| List | ordre d'insertion, doublons admis | `LPUSH`, `RPUSH`, `LPOP`, `LRANGE` | file simple, historique borné |
+| Set | éléments uniques, sans ordre | `SADD`, `SISMEMBER`, `SINTER` | participants, étiquettes |
+| Sorted set | éléments uniques ordonnés par score | `ZADD`, `ZRANGE`, `ZINCRBY` | classement, priorité |
+
+## Strings
+
+Une string Redis peut contenir du texte, un nombre ou des octets. Redis interprète une représentation numérique lorsque la commande l'exige :
+
+```text
+SET article:42:views 0
+INCR article:42:views
+GET article:42:views
+```
+
+Stocker tout un objet en JSON dans une string est simple et interopérable. En contrepartie, modifier un seul attribut impose généralement de lire ou réécrire l'objet complet, sauf à utiliser les capacités JSON dédiées d'une distribution qui les fournit.
+
+## Hashes
+
+Un hash regroupe les attributs d'un objet sous une clé :
+
+```text
+HSET user:42 name "Ada" email "ada@example.test" role "student"
+HGET user:42 name
+HMGET user:42 name role
+HGETALL user:42
+HINCRBY user:42 logins 1
+```
+
+Le hash est pertinent lorsque plusieurs champs doivent être lus ou modifiés indépendamment. Il ne fournit pas à lui seul la validation, les relations ou les requêtes riches d'un modèle relationnel.
+
+## Lists
+
+Une liste conserve l'ordre d'insertion et accepte les doublons :
+
+```text
+LPUSH notifications:42 "nouveau-message"
+LPUSH notifications:42 "cours-publie"
+LRANGE notifications:42 0 9
+LTRIM notifications:42 0 99
+```
+
+Le couple `LPUSH` puis `LTRIM` permet de conserver les éléments les plus récents. Pour un traitement distribué avec accusé de réception et reprise, les Streams offrent des garanties plus adaptées qu'une simple liste.
+
+## Sets
+
+Un ensemble garantit l'unicité :
+
+```text
+SADD course:redis:participants student:1 student:2 student:1
+SCARD course:redis:participants
+SISMEMBER course:redis:participants student:2
+SREM course:redis:participants student:1
+```
+
+Les opérations d'union, d'intersection et de différence permettent de raisonner directement sur des groupes.
+
+## Sorted sets
+
+Chaque membre unique possède un score :
+
+```text
+ZADD ranking:redis 12 student:1 18 student:2
+ZINCRBY ranking:redis 3 student:1
+ZRANGE ranking:redis 0 -1 REV WITHSCORES
+ZRANK ranking:redis student:2
+```
+
+L'ordre est maintenu par Redis. Le membre et son score jouent des rôles différents : ajouter le même membre avec un nouveau score met son score à jour au lieu de créer un doublon.
+
+## Concevoir à partir des opérations
+
+Pour choisir une structure, poser les questions suivantes :
+
+1. L'unicité est-elle requise ?
+2. L'ordre est-il important et, si oui, dépend-il de l'insertion ou d'un score ?
+3. Faut-il modifier des champs indépendamment ?
+4. L'opération attendue existe-t-elle comme commande atomique ?
+5. Toute la clé partage-t-elle la même durée de vie ?
+6. Combien d'éléments ou d'octets la structure peut-elle atteindre ?
+7. Que coûte sa lecture la plus fréquente ?
+
+::: {.callout-tip title="Partir des accès, pas de la classe Java"}
+La classe Java décrit la forme métier. Le modèle Redis doit d'abord optimiser des opérations explicites. Copier mécaniquement chaque objet Java dans une valeur Redis produit souvent des clés difficiles à faire évoluer ou à invalider.
+:::
+
+## Identifier les limites du modèle
+
+Un modèle peut être excellent pour certaines opérations et incapable d'en satisfaire une autre efficacement. Un hash `student:42` convient pour retrouver l'étudiant 42, mais ne permet pas à lui seul de retrouver tous les étudiants habitant Lyon lorsque leurs identifiants sont inconnus.
+
+Il faut alors choisir entre :
+
+- parcourir les données, ce qui devient coûteux ;
+- maintenir une structure supplémentaire servant d'index ;
+- utiliser un moteur de recherche et d'indexation ;
+- confier la requête à une base plus adaptée.
+
+Ce constat conduit à la partie suivante : index secondaires, duplication, projections et cohérence.

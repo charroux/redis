@@ -1,0 +1,142 @@
+---
+title: "Duplication, index et projections"
+---
+
+## De l'accès primaire à la recherche secondaire
+
+L'API fondamentale de Redis adresse les données par leur clé. Une application qui connaît `student:42` peut lire directement l'enregistrement. Une application qui connaît seulement la ville « Lyon » doit disposer d'un autre chemin d'accès.
+
+Redis permet de construire ces chemins avec ses structures natives :
+
+```text
+student:42                    # hash canonique
+students:by-email             # hash : email -> identifiant
+students:by-city:Lyon         # set d'identifiants
+students:by-score             # sorted set : identifiant + score
+```
+
+La documentation Redis qualifie ces structures d'[index secondaires](https://redis.io/docs/latest/develop/clients/patterns/indexes/). Elles accélèrent les lectures au prix de mémoire et d'écritures supplémentaires.
+
+## La donnée canonique
+
+Une représentation doit être désignée comme référence. Les index ne devraient contenir que les informations nécessaires à leur fonction, souvent un identifiant ou un score :
+
+```text
+HSET student:42 \
+  name "Ada" \
+  email "ada@example.test" \
+  city "Paris" \
+  version 7 \
+  source "students-service"
+
+HSET students:by-email "ada@example.test" 42
+SADD students:by-city:Paris 42
+ZADD students:by-score 912.5 42
+```
+
+La fiche `student:42` possède l'état métier. Les autres clés sont des **projections** optimisées pour une question : rechercher par email, ville ou score.
+
+::: {.callout-tip title="Dupliquer une référence plutôt qu'un objet"}
+Copier l'objet complet dans chaque index multiplie les risques de divergence. Dupliquer seulement son identifiant réduit le stockage et oblige les lectures à revenir vers la donnée canonique.
+:::
+
+## Les risques de la dénormalisation
+
+| Risque | Manifestation | Mesure principale |
+|---|---|---|
+| Copie obsolète | ancien email ou ancienne ville dans l'index | version, mise à jour atomique ou événementielle |
+| Stockage accru | identifiant présent dans plusieurs structures | ne matérialiser que les chemins utiles |
+| Amplification d'écriture | une modification produit plusieurs commandes | grouper, mesurer et limiter les projections |
+| Écriture partielle | fiche modifiée mais ancien index conservé | transaction, fonction ou réconciliation |
+| Double traitement | même événement appliqué deux fois | idempotence par version ou identifiant |
+
+La duplication n'est donc pas un accident. C'est une décision de conception qui échange un coût d'écriture contre un chemin de lecture rapide.
+
+## Modifier une projection
+
+Ada déménage de Paris à Lyon. Trois écritures sont nécessaires :
+
+```text
+SREM students:by-city:Paris 42
+SADD students:by-city:Lyon 42
+HSET student:42 city Lyon version 8
+```
+
+Si l'application connaît l'ancienne ville et travaille sur une instance unique, elle peut regrouper les commandes :
+
+```text
+MULTI
+SREM students:by-city:Paris 42
+SADD students:by-city:Lyon 42
+HSET student:42 city Lyon version 8
+EXEC
+```
+
+`MULTI` et `EXEC` empêchent l'intercalage des commandes d'un autre client pendant l'exécution du groupe. Redis ne réalise toutefois pas de rollback comparable à celui d'une base relationnelle lorsque la logique applicative est erronée.
+
+Lorsque l'ancien état doit être lu et vérifié avant la modification :
+
+- `WATCH` fournit un contrôle optimiste ;
+- une fonction Redis peut lire, vérifier et écrire atomiquement ;
+- une architecture événementielle peut accepter un court décalage entre source et projection.
+
+Les [fonctions Redis](https://redis.io/docs/latest/develop/programmability/functions-intro/) s'exécutent atomiquement, mais doivent rester courtes car leur exécution bloque l'instance.
+
+## Transactions, fonctions et pipeline
+
+Ces mécanismes ne répondent pas au même besoin :
+
+- le **pipeline** réduit les allers-retours réseau ; il ne crée pas d'isolation ;
+- `MULTI`/`EXEC` exécute un groupe de commandes sans intercalage ;
+- `WATCH` annule une transaction si une clé observée a changé ;
+- une **fonction Redis** encapsule une logique conditionnelle atomique côté serveur.
+
+La [documentation des transactions](https://redis.io/docs/latest/develop/using-commands/transactions/) précise leurs garanties.
+
+## Propriété et provenance
+
+Un champ `source` aide à diagnostiquer une valeur, mais ne fait pas respecter la propriété. Une règle d'architecture est nécessaire :
+
+> Un seul composant produit l'état canonique ; chaque autre composant ne modifie que les projections dont il est responsable.
+
+Une projection peut enregistrer :
+
+```text
+source          students-service
+version         8
+lastEventId     1760000000000-0
+schemaVersion   2
+updatedAt       2026-10-06T10:15:00Z
+```
+
+Ces métadonnées permettent de détecter une projection ancienne, un événement rejoué ou un format à migrer.
+
+## Mises à jour idempotentes
+
+Une opération idempotente peut être rejouée sans produire un résultat supplémentaire. Pour une projection versionnée :
+
+- événement de version inférieure ou égale : ne rien faire ;
+- version suivante attendue : appliquer puis avancer la version ;
+- version créant un trou : suspendre et réconcilier.
+
+Un marqueur peut également être créé avec `SET ... NX`, mais le marqueur et la modification doivent appartenir à la même opération atomique. Sinon, une panne entre les deux peut marquer comme traité un événement qui ne l'a jamais été.
+
+## Réconcilier
+
+La réconciliation vérifie que les projections correspondent encore à la source :
+
+1. parcourir progressivement les clés canoniques avec `SCAN` ;
+2. comparer les versions et les appartenances aux index ;
+3. supprimer les références orphelines ;
+4. ajouter les références manquantes ;
+5. reconstruire une nouvelle version de l'index si nécessaire ;
+6. mesurer le nombre d'incohérences et le retard de traitement.
+
+Une projection correctement conçue doit pouvoir être supprimée puis reconstruite depuis sa source canonique ou depuis un journal suffisamment complet.
+
+## Limite du cluster
+
+Sur une instance unique, plusieurs clés peuvent participer à une transaction ou une fonction. Dans Redis Cluster, les opérations atomiques multi-clés exigent que les clés concernées appartiennent au même *hash slot*. Un index global par ville et les fiches individuelles ne sont généralement pas colocalisés.
+
+Les choix deviennent alors explicites : colocaliser certaines clés, accepter une cohérence éventuelle, utiliser Redis Search ou placer la requête dans un autre système.
+

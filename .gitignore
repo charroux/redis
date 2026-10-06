@@ -1,0 +1,11 @@
+**/.quarto/
+**/_site/
+**/target/
+/.idea/
+/.vscode/
+*.iml
+
+
+**/*.quarto_ipynb
+
+/.quarto/

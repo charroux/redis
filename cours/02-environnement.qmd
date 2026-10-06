@@ -1,0 +1,85 @@
+---
+title: "Un environnement reproductible avec Docker"
+---
+
+## Pourquoi conteneuriser Redis pour le cours
+
+L'image Docker officielle fournit le serveur et `redis-cli`. Un même fichier `compose.yaml` permet ainsi à tous les étudiants d'utiliser la même version et la même configuration, quel que soit leur système hôte.
+
+Le dépôt utilise l'image `redis:8.10.2-alpine`. Le numéro est fixé afin qu'une évolution future de l'image `latest` ne modifie pas le comportement du cours sans validation.
+
+## Docker sous Windows : Linux dans Windows
+
+Un conteneur partage le noyau du système sur lequel il s'exécute. L'image officielle Redis utilisée ici est une **image Linux** : son système de fichiers et ses programmes attendent donc un noyau Linux.
+
+Sous Windows, Docker Desktop fournit ce noyau grâce à une petite machine virtuelle, généralement via **WSL 2** :
+
+```{mermaid}
+flowchart TB
+    W[Windows] --> D[Docker Desktop]
+    D --> L[Noyau Linux via WSL 2]
+    L --> C[Conteneur Redis Linux]
+    A[Application Spring sur Windows] -->|localhost:6379| C
+```
+
+« Utiliser les conteneurs Linux » ne signifie donc pas installer Linux à la place de Windows. Cela signifie laisser Docker Desktop exécuter l'image Redis dans son environnement Linux intégré. C'est le mode habituel de Docker Desktop.
+
+Sur une installation susceptible d'avoir été basculée vers les conteneurs Windows, le menu Docker Desktop propose l'action **Switch to Linux containers**. Avec le backend WSL 2 moderne, ce choix est généralement déjà actif. La documentation Docker détaille le [backend WSL 2 de Docker Desktop](https://docs.docker.com/desktop/features/wsl/).
+
+::: {.callout-important title="À vérifier avant la formation"}
+Docker Desktop doit être démarré, WSL 2 opérationnel et la commande `docker version` doit afficher un serveur Linux. L'installation et le téléchargement de l'image doivent être testés avant le jour du cours.
+:::
+
+## Le fichier Compose
+
+Le fichier fourni dans le dépôt décrit un seul service :
+
+```yaml
+services:
+  redis:
+    image: redis:8.10.2-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+```
+
+Le préfixe `127.0.0.1` évite d'exposer volontairement Redis sur les autres interfaces réseau de la machine. Le contrôle de santé envoie régulièrement `PING` depuis le conteneur.
+
+Compose n'est pas techniquement indispensable pour un seul conteneur. Il est retenu comme contrat reproductible et versionné : image, port et contrôle de santé sont lisibles au même endroit. Docker présente Compose comme l'outil permettant de décrire services, réseaux et volumes dans un fichier YAML puis de gérer leur cycle de vie avec une commande. Voir la [documentation Docker Compose](https://docs.docker.com/compose/).
+
+## Cycle de vie
+
+```bash
+# Créer ou démarrer Redis en arrière-plan
+docker compose up -d
+
+# Vérifier l'état du service
+docker compose ps
+
+# Ouvrir le CLI présent dans le conteneur
+docker compose exec redis redis-cli
+
+# Consulter les journaux
+docker compose logs redis
+
+# Arrêter et supprimer le conteneur
+docker compose down
+```
+
+Le cours n'utilise pas encore de volume persistant. La suppression du conteneur supprime donc son jeu de données, ce qui garantit un redémarrage propre. La persistance sera distinguée de la simple durée de vie du conteneur dans le dernier chapitre.
+
+## Vérification minimale
+
+Dans `redis-cli`, une instance disponible répond à `PING` :
+
+```text
+127.0.0.1:6379> PING
+PONG
+```
+
+La documentation Redis fournit également les variantes avec `docker run` et avec un `redis-cli` local : [exécuter Redis avec Docker](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/).
+
